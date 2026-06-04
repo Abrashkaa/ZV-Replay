@@ -1,8 +1,7 @@
 // ================================================================
-//  ZV Replay Viewer — viewer.js  v4.7
-//  Fix: SyntaxError in template literals | universal faction support
-//  Все фракции хранятся по ключу из JSON (RHS_USAF, FIA, US и т.д.)
-//  Хардкод '0'→'US' убран — всё динамически
+//  ZV Replay Viewer — viewer.js  v4.8
+//  Fix: line-by-line parser for kills/shots/stats sections
+//  Fix: wpName handles RHS and other mod weapon keys
 // ================================================================
 
 // ── NoSQL helpers ─────────────────────────────────────────────
@@ -50,8 +49,6 @@ function getBotStrokeColor(fac){
 }
 
 // ── Фракции ───────────────────────────────────────────────────
-// Структура: { factionKey: { name, color, strokeColor, labelColor } }
-// factionKey — то что пишет мод (RHS_USAF, FIA, US и т.д.)
 const FAC_DEF={
   'US':      {name:'United States', color:'#1a3a5c',strokeColor:'#4a88c0',labelColor:'#7ab8e0'},
   'USSR':    {name:'Soviet Union',  color:'#5c1a1a',strokeColor:'#c04a4a',labelColor:'#e07a7a'},
@@ -61,30 +58,14 @@ const FAC_DEF={
 };
 let factions=DB.get('zv_factions',FAC_DEF);
 
-// Нормализует ключ фракции: убирает числовые алиасы если есть
-function normFac(key){
-  if(!key||key===''||key==='-1')return null;
-  return String(key);
-}
+function normFac(key){if(!key||key===''||key==='-1')return null;return String(key);}
+function getFac(key){const k=normFac(key);if(!k)return null;return factions[k]||null;}
 
-function getFac(key){
-  const k=normFac(key);
-  if(!k)return null;
-  return factions[k]||null;
-}
-
-// Если фракция неизвестна — авто-создаём с дефолтным цветом
 function autoFac(key){
-  const k=normFac(key);
-  if(!k)return null;
+  const k=normFac(key);if(!k)return null;
   if(factions[k])return factions[k];
-  // Авто-создание неизвестной фракции
   const hue=(k.split('').reduce((a,c)=>a+c.charCodeAt(0),0)*137)%360;
-  const color=`hsl(${hue},40%,30%)`;
-  const strokeColor=`hsl(${hue},50%,50%)`;
-  const labelColor=`hsl(${hue},60%,70%)`;
-  factions[k]={name:k,color,strokeColor,labelColor,_auto:true};
-  // Сохраняем
+  factions[k]={name:k,color:'hsl('+hue+',40%,30%)',strokeColor:'hsl('+hue+',50%,50%)',labelColor:'hsl('+hue+',60%,70%)',_auto:true};
   DB.set('zv_factions',factions);
   return factions[k];
 }
@@ -92,97 +73,56 @@ function autoFac(key){
 function facColor(key){return getFac(key)?.color||null;}
 function facStroke(key){return getFac(key)?.strokeColor||getFac(key)?.color||null;}
 function facLabelColor(key){return getFac(key)?.labelColor||getFac(key)?.color||null;}
-function facName(key){
-  const k=normFac(key);if(!k)return'?';
-  return getFac(key)?.name||k;
-}
+function facName(key){const k=normFac(key);if(!k)return'?';return getFac(key)?.name||k;}
 function facCSS(key){return facColor(key)||'#2a3a30';}
 
-// Авто-регистрация фракций из реплея при загрузке
 function registerFactionsFromReplay(){
   if(!data)return;
   const seen=new Set();
-  for(const fr of data.frames){
-    for(const e of fr.e){
-      if(e.fac&&!seen.has(e.fac)){seen.add(e.fac);autoFac(e.fac);}
-    }
-  }
-  for(const k of data.kills||[]){
-    if(k.kfac)autoFac(k.kfac);
-    if(k.vfac)autoFac(k.vfac);
-  }
+  for(const fr of data.frames)for(const e of fr.e){if(e.fac&&!seen.has(e.fac)){seen.add(e.fac);autoFac(e.fac);}}
+  for(const k of data.kills||[]){if(k.kfac)autoFac(k.kfac);if(k.vfac)autoFac(k.vfac);}
 }
 
-// ── Рендер списка фракций (без onclick с аргументами — используем data-key) ──
 function renderFacList(){
-  const el=document.getElementById('fac-list');
-  el.innerHTML='';
+  const el=document.getElementById('fac-list');el.innerHTML='';
   Object.entries(factions).forEach(([k,f])=>{
-    if(f._auto)return; // не показываем авто-добавленные
-    const item=document.createElement('div');
-    item.className='list-item';
-    item.dataset.key=k;
-    const dot1=document.createElement('div');
-    dot1.style.cssText=`width:14px;height:14px;background:${f.color};border:2px solid ${f.strokeColor||f.color};border-radius:2px;flex-shrink:0;`;
-    dot1.title='Заливка';
-    const dot2=document.createElement('div');
-    dot2.style.cssText=`width:14px;height:14px;background:${f.labelColor||f.color};border-radius:2px;flex-shrink:0;`;
-    dot2.title='Ник';
-    const dots=document.createElement('div');
-    dots.style.cssText='display:flex;gap:3px;flex-shrink:0;';
-    dots.append(dot1,dot2);
-
-    const keySpan=document.createElement('span');keySpan.className='list-item-key';keySpan.textContent=k;
-    const nameSpan=document.createElement('span');nameSpan.className='list-item-name';nameSpan.textContent=f.name;
-
-    const editBtn=document.createElement('button');editBtn.className='list-item-btn';editBtn.textContent='✎';
-    editBtn.onclick=()=>editFaction(k);
-    const delBtn=document.createElement('button');delBtn.className='list-item-del';delBtn.textContent='✕';
-    delBtn.onclick=()=>deleteFaction(k);
-    const actions=document.createElement('div');actions.className='list-item-actions';
-    actions.append(editBtn,delBtn);
-
-    item.append(dots,keySpan,nameSpan,actions);
-    el.appendChild(item);
+    if(f._auto)return;
+    const item=document.createElement('div');item.className='list-item';item.dataset.key=k;
+    const d1=document.createElement('div');d1.style.cssText='width:14px;height:14px;background:'+f.color+';border:2px solid '+(f.strokeColor||f.color)+';border-radius:2px;flex-shrink:0;';
+    const d2=document.createElement('div');d2.style.cssText='width:14px;height:14px;background:'+(f.labelColor||f.color)+';border-radius:2px;flex-shrink:0;';
+    const dots=document.createElement('div');dots.style.cssText='display:flex;gap:3px;flex-shrink:0;';dots.append(d1,d2);
+    const ks=document.createElement('span');ks.className='list-item-key';ks.textContent=k;
+    const ns=document.createElement('span');ns.className='list-item-name';ns.textContent=f.name;
+    const eb=document.createElement('button');eb.className='list-item-btn';eb.textContent='✎';eb.onclick=()=>editFaction(k);
+    const db=document.createElement('button');db.className='list-item-del';db.textContent='✕';db.onclick=()=>deleteFaction(k);
+    const ac=document.createElement('div');ac.className='list-item-actions';ac.append(eb,db);
+    item.append(dots,ks,ns,ac);el.appendChild(item);
   });
 }
-
 function editFaction(key){
   const f=factions[key];if(!f)return;
-  const item=[...document.querySelectorAll('#fac-list .list-item')].find(el=>el.dataset.key===key);
-  if(!item)return;
+  const item=[...document.querySelectorAll('#fac-list .list-item')].find(el=>el.dataset.key===key);if(!item)return;
   item.innerHTML='';
-
-  // 3 colour pickers
-  const colorWrap=document.createElement('div');
-  colorWrap.style.cssText='display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:8px;color:var(--muted);flex-shrink:0;';
+  const cw=document.createElement('div');cw.style.cssText='display:flex;flex-direction:column;gap:2px;font-family:var(--mono);font-size:8px;color:var(--muted);flex-shrink:0;';
   ['fill','stroke','label'].forEach((lbl,i)=>{
     const val=[f.color,f.strokeColor||f.color,f.labelColor||f.color][i];
-    const label=document.createElement('label');
-    label.style.cssText='display:flex;align-items:center;gap:3px;';
-    const inp=document.createElement('input');inp.type='color';inp.value=val;
-    inp.style.cssText='width:24px;height:18px;border:none;background:transparent;cursor:pointer;padding:0;';
-    label.append(inp,Object.assign(document.createElement('span'),{textContent:lbl}));
-    colorWrap.appendChild(label);
+    const la=document.createElement('label');la.style.cssText='display:flex;align-items:center;gap:3px;';
+    const inp=document.createElement('input');inp.type='color';inp.value=val;inp.style.cssText='width:24px;height:18px;border:none;background:transparent;cursor:pointer;padding:0;';
+    la.append(inp,Object.assign(document.createElement('span'),{textContent:lbl}));cw.appendChild(la);
   });
-
-  const keyInp=document.createElement('input');keyInp.className='edit-input';keyInp.value=key;keyInp.style.cssText='width:80px;opacity:.5;';keyInp.readOnly=true;
-  const nameInp=document.createElement('input');nameInp.className='edit-input';nameInp.value=f.name;nameInp.style.cssText='flex:1;';nameInp.placeholder='Название';
-
-  const saveBtn=document.createElement('button');saveBtn.className='list-item-btn save';saveBtn.textContent='✓';
-  saveBtn.onclick=()=>{
-    const pickers=colorWrap.querySelectorAll('input[type=color]');
-    factions[key]={name:nameInp.value.trim()||key,color:pickers[0].value,strokeColor:pickers[1].value,labelColor:pickers[2].value};
+  const ki=document.createElement('input');ki.className='edit-input';ki.value=key;ki.style.cssText='width:80px;opacity:.5;';ki.readOnly=true;
+  const ni=document.createElement('input');ni.className='edit-input';ni.value=f.name;ni.style.cssText='flex:1;';
+  const sb=document.createElement('button');sb.className='list-item-btn save';sb.textContent='✓';
+  sb.onclick=()=>{
+    const pp=cw.querySelectorAll('input[type=color]');
+    factions[key]={name:ni.value.trim()||key,color:pp[0].value,strokeColor:pp[1].value,labelColor:pp[2].value};
     DB.set('zv_factions',factions);renderFacList();showToast('Фракция обновлена');
     if(data){buildKills();buildStats();buildRoster();render();}
   };
-  const cancelBtn=document.createElement('button');cancelBtn.className='list-item-del';cancelBtn.textContent='✕';
-  cancelBtn.onclick=()=>renderFacList();
-  const actions=document.createElement('div');actions.className='list-item-actions';actions.append(saveBtn,cancelBtn);
-
-  item.append(colorWrap,keyInp,nameInp,actions);
+  const cb=document.createElement('button');cb.className='list-item-del';cb.textContent='✕';cb.onclick=()=>renderFacList();
+  const ac=document.createElement('div');ac.className='list-item-actions';ac.append(sb,cb);
+  item.append(cw,ki,ni,ac);
 }
-
 function addFaction(){
   const key=document.getElementById('fac-key-in').value.trim();
   const name=document.getElementById('fac-name-in').value.trim();
@@ -192,10 +132,7 @@ function addFaction(){
   DB.set('zv_factions',factions);renderFacList();showToast('Фракция добавлена');
   document.getElementById('fac-key-in').value='';document.getElementById('fac-name-in').value='';
 }
-function deleteFaction(key){
-  delete factions[key];DB.set('zv_factions',factions);renderFacList();
-  if(data){buildKills();buildStats();buildRoster();}
-}
+function deleteFaction(key){delete factions[key];DB.set('zv_factions',factions);renderFacList();if(data){buildKills();buildStats();buildRoster();}}
 
 // ── Оружие ────────────────────────────────────────────────────
 const WP_DEF={'#AR-Weapon_M16A2_Name':'M16A2','#AR-Weapon_M249_Name':'M249','#AR-Weapon_VZ58P_Name':'VZ-58P','#AR-Weapon_VZ58V_Name':'VZ-58V','#AR-Weapon_VZ58_Name':'VZ-58','#AR-Weapon_SVD_Name':'SVD','#AR-Weapon_AKS74U_Name':'AKS-74U','#AR-Weapon_AK74_Name':'AK-74','#AR-Weapon_RPG7_Name':'RPG-7','#AR-Weapon_M72_Name':'M72 LAW','#AR-Weapon_M2_Name':'M2','#AR-Weapon_PKM_Name':'PKM','#AR-Weapon_Pistol_M9_Name':'M9','#AR-Weapon_Pistol_TT_Name':'TT-33'};
@@ -203,14 +140,18 @@ let weapons=DB.get('zv_weapons',WP_DEF);
 
 function wpName(raw){
   if(!raw||raw==='Unknown')return null;
+  // 1. Точный маппинг из настроек
   if(weapons[raw])return weapons[raw];
-  // Авто-парсинг: #AR-Weapon_M16A2_Name → M16A2
-  const m=raw.match(/#[A-Za-z_]*Weapon_(.+?)_Name/i);
-  if(m)return m[1].replace(/_/g,' ');
-  // Авто-парсинг RHS и других модов: берём последнюю часть
-  const parts=raw.replace(/^#/,'').split('_');
-  if(parts.length>1&&parts[parts.length-1]==='Name')
-    return parts.slice(0,-1).filter(p=>p&&p!=='AR'&&p!=='Weapon').join(' ');
+  // 2. Нормализуем: убираем суффикс в скобках "(B30U/B31N)" и т.д.
+  const clean=raw.replace(/\s*\([^)]*\)\s*$/,'').trim();
+  if(weapons[clean])return weapons[clean];
+  // 3. Авто-парсинг: ищем слово перед "_Name" или "-Name"
+  //    Работает для: #AR-Weapon_M16A2_Name, #RHS-Weapon_AK105_Name
+  const m=clean.match(/[-_](\w+)[-_]Name\s*$/i);
+  if(m)return m[1];
+  // 4. Fallback: берём всё между первым _ и _Name
+  const m2=clean.match(/#[^_-]+[-_](?:Weapon[-_])?(.+?)(?:[-_]Name)?$/i);
+  if(m2)return m2[1].replace(/[-_]/g,' ').trim();
   return raw;
 }
 
@@ -231,12 +172,7 @@ function editWeapon(item,key,name){
   const ki=document.createElement('input');ki.className='edit-input';ki.value=key;ki.style.cssText='flex:1;font-size:8px;';
   const ni=document.createElement('input');ni.className='edit-input';ni.value=name;ni.style.cssText='width:85px;';
   const sb=document.createElement('button');sb.className='list-item-btn save';sb.textContent='✓';
-  sb.onclick=()=>{
-    const nk=ki.value.trim(),nn=ni.value.trim();
-    if(!nk||!nn){showToast('Заполните оба поля','#550000');return;}
-    if(nk!==key)delete weapons[key];
-    weapons[nk]=nn;DB.set('zv_weapons',weapons);renderWpList();showToast('Оружие: '+nn);
-  };
+  sb.onclick=()=>{const nk=ki.value.trim(),nn=ni.value.trim();if(!nk||!nn){showToast('Заполните оба поля','#550000');return;}if(nk!==key)delete weapons[key];weapons[nk]=nn;DB.set('zv_weapons',weapons);renderWpList();showToast('Оружие: '+nn);};
   const cb=document.createElement('button');cb.className='list-item-del';cb.textContent='✕';cb.onclick=()=>renderWpList();
   const ac=document.createElement('div');ac.className='list-item-actions';ac.append(sb,cb);
   item.append(ki,ni,ac);
@@ -252,22 +188,18 @@ function addWeapon(){
 // ── Техника ───────────────────────────────────────────────────
 const VEH_DEF={'#AR-Vehicle_M923A1_Engineer_Name':'M923A1','#AR-Vehicle_M923A1_Name':'M923A1','#AR-Vehicle_UH1H_Gunship_Name_HEDP':'UH-1H Gunship','#AR-Vehicle_UH1H_Name':'UH-1H','#AR-Vehicle_LAV25_Name':'LAV-25','#AR-Vehicle_BTR70_Name':'BTR-70','#AR-Vehicle_Skoda105_Name':'Škoda 105','#AR-Vehicle_M1025_Name':'M1025','#AR-Vehicle_UAZ469_Name':'UAZ-469','#AR-Vehicle_T72_Name':'T-72','#AR-Vehicle_M113_Name':'M113','#AR-Vehicle_BMP1_Name':'BMP-1'};
 let vehicles=DB.get('zv_vehicles',VEH_DEF);
-
 function vehName(raw){
   if(!raw)return null;
   if(raw.includes(' | '))return raw;
   if(raw==='Turret')return null;
   if(vehicles[raw])return vehicles[raw];
-  // Универсальный авто-парсинг: #AR-Vehicle_M923A1_Engineer_Name → M923A1
-  const m=raw.match(/#[A-Za-z_]*Vehicle_([^_]+)/i);
+  const m=raw.match(/#[A-Za-z_-]*Vehicle[-_]([^_]+)/i);
   if(m)return m[1];
   return raw;
 }
-
 const VEH_COLORS_DEF={fillColor:'#1a2a3a',strokeColor:'#4a8aaa',labelColor:'#a0c8d8',destroyedColor:'#3a2a1a',hpTextColor:'#e0e0b0'};
 let vehColors=DB.get('zv_veh_colors',VEH_COLORS_DEF);
 function getVehColors(){return vehColors;}
-
 function renderVehList(){
   const el=document.getElementById('veh-list');if(!el)return;el.innerHTML='';
   Object.entries(vehicles).forEach(([k,name])=>{
@@ -285,12 +217,7 @@ function editVehicle(item,key,name){
   const ki=document.createElement('input');ki.className='edit-input';ki.value=key;ki.style.cssText='flex:1;font-size:8px;';
   const ni=document.createElement('input');ni.className='edit-input';ni.value=name;ni.style.cssText='width:85px;';
   const sb=document.createElement('button');sb.className='list-item-btn save';sb.textContent='✓';
-  sb.onclick=()=>{
-    const nk=ki.value.trim(),nn=ni.value.trim();
-    if(!nk||!nn){showToast('Заполните оба поля','#550000');return;}
-    if(nk!==key)delete vehicles[key];
-    vehicles[nk]=nn;DB.set('zv_vehicles',vehicles);renderVehList();showToast('Техника: '+nn);
-  };
+  sb.onclick=()=>{const nk=ki.value.trim(),nn=ni.value.trim();if(!nk||!nn){showToast('Заполните оба поля','#550000');return;}if(nk!==key)delete vehicles[key];vehicles[nk]=nn;DB.set('zv_vehicles',vehicles);renderVehList();showToast('Техника: '+nn);};
   const cb=document.createElement('button');cb.className='list-item-del';cb.textContent='✕';cb.onclick=()=>renderVehList();
   const ac=document.createElement('div');ac.className='list-item-actions';ac.append(sb,cb);
   item.append(ki,ni,ac);
@@ -304,14 +231,10 @@ function addVehicle(){
 }
 function loadVehColors(){
   const c=getVehColors();
-  [['vc-fill','fillColor'],['vc-stroke','strokeColor'],['vc-label','labelColor'],['vc-destroyed','destroyedColor'],['vc-hp-text','hpTextColor']].forEach(([id,k])=>{
-    const el=document.getElementById(id);if(el)el.value=c[k]||'#ffffff';
-  });
+  [['vc-fill','fillColor'],['vc-stroke','strokeColor'],['vc-label','labelColor'],['vc-destroyed','destroyedColor'],['vc-hp-text','hpTextColor']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)el.value=c[k]||'#ffffff';});
 }
 function saveVehColors(){
-  [['vc-fill','fillColor'],['vc-stroke','strokeColor'],['vc-label','labelColor'],['vc-destroyed','destroyedColor'],['vc-hp-text','hpTextColor']].forEach(([id,k])=>{
-    const el=document.getElementById(id);if(el)vehColors[k]=el.value;
-  });
+  [['vc-fill','fillColor'],['vc-stroke','strokeColor'],['vc-label','labelColor'],['vc-destroyed','destroyedColor'],['vc-hp-text','hpTextColor']].forEach(([id,k])=>{const el=document.getElementById(id);if(el)vehColors[k]=el.value;});
   DB.set('zv_veh_colors',vehColors);render();showToast('Цвета техники сохранены');
 }
 
@@ -330,16 +253,14 @@ function handleMapUpload(input){
     mapImages[key]=ev.target.result;mapsDef[key]={label:label||key,size};
     DB.set('zv_map_images',mapImages);DB.set('zv_maps',mapsDef);
     renderMapsList();rebuildMapSelect();
-    status.textContent='✓ "'+key+'"';status.style.color='#5a9a5a';
-    showToast('Карта "'+key+'" добавлена');
+    status.textContent='✓ "'+key+'"';status.style.color='#5a9a5a';showToast('Карта "'+key+'" добавлена');
   };
   reader.readAsDataURL(file);
 }
 function deleteMap(key){
   if(key==='everon'||key==='arland'){showToast('Базовые нельзя удалить','#550000');return;}
   delete mapImages[key];delete mapsDef[key];
-  DB.set('zv_map_images',mapImages);DB.set('zv_maps',mapsDef);
-  renderMapsList();rebuildMapSelect();
+  DB.set('zv_map_images',mapImages);DB.set('zv_maps',mapsDef);renderMapsList();rebuildMapSelect();
 }
 function renderMapsList(){
   const el=document.getElementById('maps-list');el.innerHTML='';
@@ -355,9 +276,7 @@ function renderMapsList(){
 }
 function rebuildMapSelect(){
   const sel=document.getElementById('map-select'),cur=sel.value;sel.innerHTML='';
-  Object.entries(mapsDef).forEach(([k,m])=>{
-    const opt=document.createElement('option');opt.value=k;opt.textContent=m.label;if(k===cur)opt.selected=true;sel.appendChild(opt);
-  });
+  Object.entries(mapsDef).forEach(([k,m])=>{const opt=document.createElement('option');opt.value=k;opt.textContent=m.label;if(k===cur)opt.selected=true;sel.appendChild(opt);});
 }
 
 // ── Settings ──────────────────────────────────────────────────
@@ -380,11 +299,7 @@ document.getElementById('map-select').onchange=function(){mapKey=this.value;setM
 (function(){
   function connect(){
     const ws=new WebSocket('ws://'+location.host);
-    ws.onmessage=e=>{
-      const m=JSON.parse(e.data);
-      if(m.type==='reload')location.reload();
-      else if(m.type==='new_replay'){showToast('Новый реплей: '+m.name);if(mode==='server')loadReplayList();}
-    };
+    ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.type==='reload')location.reload();else if(m.type==='new_replay'){showToast('Новый реплей: '+m.name);if(mode==='server')loadReplayList();}};
     ws.onclose=()=>setTimeout(connect,2000);ws.onerror=()=>ws.close();
   }
   if(location.protocol!=='file:')connect();
@@ -397,7 +312,11 @@ function showToast(text,color){
   clearTimeout(t._t);t._t=setTimeout(()=>{t.style.opacity='0';},2800);
 }
 
-// ── JSON repair ───────────────────────────────────────────────
+// ── JSON parser ───────────────────────────────────────────────
+// Формат файла: каждая строка — один объект или заголовок секции.
+// Поддерживает оба формата: построчный (новый) и одна строка (старый).
+// Чинит строки обрезанные на 8192 байтах (лимит fh.WriteLine).
+
 function parseReplayJSON(text){
   try{return JSON.parse(text);}catch(e){return repairReplayJSON(text);}
 }
@@ -405,38 +324,53 @@ function parseReplayJSON(text){
 function repairReplayJSON(text){
   const r={meta:{},frames:[],kills:[],shots:[],stats:[]};
   const lines=text.split('\n');
+  let section=null; // текущая секция: frames|kills|shots|stats|null
 
   for(const rawLine of lines){
     const l=rawLine.trim();
     if(!l||l==='{'||l==='}')continue;
 
-    let handled=false;
-    for(const k of['meta','kills','shots','stats']){
-      if(l.startsWith('"'+k+'":')){ // избегаем template literal здесь
-        try{
-          const s=l.endsWith(',')?l.slice(0,-1):l;
-          r[k]=JSON.parse('{'+s+'}')[k]||(Array.isArray(r[k])?[]:{});
-        }catch(e){}
-        handled=true;break;
-      }
-    }
-    if(handled)continue;
+    // Заголовки секций (построчный формат)
+    if(l==='"frames":['){ section='frames';  continue; }
+    if(l==='"kills":['  ){ section='kills';   continue; }
+    if(l==='"shots":['  ){ section='shots';   continue; }
+    if(l==='"stats":['  ){ section='stats';   continue; }
 
-    // Строка фрейма: ,{"t":... или {"t":...
-    if(l.startsWith(',{"t')||l.startsWith('{"t')){
-      const content=l.startsWith(',')?l.slice(1):l;
-      const frame=parseFrameLine(content);
-      if(frame)r.frames.push(frame);
+    // Конец секции
+    if(l==='],'||l===']'){ section=null; continue; }
+
+    // meta
+    if(l.startsWith('"meta":')){
+      try{const s=l.endsWith(',')?l.slice(0,-1):l;r.meta=JSON.parse('{'+s+'}').meta||{};}catch(e){}
       continue;
     }
 
-    // Старый формат — весь массив frames на одной строке
-    if(l.startsWith('"frames":'))r.frames=repairFramesInline(l);
+    // Целые секции на одной строке (старый формат или inline)
+    if(l.startsWith('"frames":')){r.frames=repairFramesInline(l);continue;}
+    if(l.startsWith('"kills":'))  {try{r.kills =JSON.parse('{'+l.replace(/,$/,'')+'}').kills||[];}catch(e){} continue;}
+    if(l.startsWith('"shots":'))  {try{r.shots =JSON.parse('{'+l.replace(/,$/,'')+'}').shots||[];}catch(e){} continue;}
+    if(l.startsWith('"stats":'))  {try{r.stats =JSON.parse('{'+l.replace(/,$/,'')+'}').stats||[];}catch(e){} continue;}
+
+    // Данные текущей секции
+    if(section){
+      const content=l.startsWith(',')?l.slice(1):l;
+      if(section==='frames'){
+        const frame=parseFrameLine(content);
+        if(frame)r.frames.push(frame);
+      } else {
+        // kills / shots / stats — каждый объект на своей строке
+        try{
+          const obj=JSON.parse(content);
+          if(obj&&typeof obj==='object'&&!Array.isArray(obj))r[section].push(obj);
+        }catch(e){}
+      }
+    }
   }
   return r;
 }
 
 function parseFrameLine(content){
+  // Сначала пробуем как есть
   try{
     const f=JSON.parse(content);
     if(typeof f.t==='number'&&Array.isArray(f.e)){
@@ -444,27 +378,20 @@ function parseFrameLine(content){
       return f;
     }
   }catch(e){}
-
-  // Строка обрезана на 8192 байтах
+  // Строка обрезана на 8192 байтах — добираем закрывающие скобки
   const closings=[',"bot":false,"hp":-1}]}',',"bot":true,"hp":-1}]}','"bot":false,"hp":-1}]}','false,"hp":-1}]}',',-1}]}','-1}]}','}]}',']}'];
   for(const c of closings){
     try{
       const f=JSON.parse(content+c);
-      if(typeof f.t==='number'&&Array.isArray(f.e)){
-        f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');
-        return f;
-      }
+      if(typeof f.t==='number'&&Array.isArray(f.e)){f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');return f;}
     }catch(e){}
   }
-  // Агрессивный fallback
-  const lastClose=content.lastIndexOf('},');
-  if(lastClose>0){
+  // Агрессивный fallback — до последнего полного entity
+  const last=content.lastIndexOf('},');
+  if(last>0){
     try{
-      const f=JSON.parse(content.slice(0,lastClose+1)+']}');
-      if(typeof f.t==='number'&&Array.isArray(f.e)){
-        f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');
-        return f;
-      }
+      const f=JSON.parse(content.slice(0,last+1)+']}');
+      if(typeof f.t==='number'&&Array.isArray(f.e)){f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');return f;}
     }catch(e){}
   }
   return null;
@@ -477,23 +404,12 @@ function repairFramesInline(line){
     while(pos<content.length&&content[pos]===',')pos++;
     if(pos>=content.length||content[pos]!=='{')break;
     let depth=0,end=pos;
-    for(let i=pos;i<content.length;i++){
-      const c=content[i];
-      if(c==='{'||c==='[')depth++;
-      else if(c==='}'||c===']'){depth--;if(depth===0){end=i;break;}}
-    }
+    for(let i=pos;i<content.length;i++){const c=content[i];if(c==='{'||c==='[')depth++;else if(c==='}'||c===']'){depth--;if(depth===0){end=i;break;}}}
     const chunk=content.slice(pos,end+1);
     try{
       const f=JSON.parse(chunk);
-      if(typeof f.t==='number'&&Array.isArray(f.e)){
-        f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');
-        frames.push(f);
-      }
-    }catch(e){
-      const next=content.indexOf(',{"t":',pos);
-      if(next===-1)break;
-      pos=next+1;continue;
-    }
+      if(typeof f.t==='number'&&Array.isArray(f.e)){f.e=f.e.filter(e=>typeof e.id==='number'&&typeof e.x==='number');frames.push(f);}
+    }catch(e){const next=content.indexOf(',{"t":',pos);if(next===-1)break;pos=next+1;continue;}
     pos=end+1;
   }
   return frames;
@@ -504,16 +420,12 @@ let weaponIndex=null;
 function buildWeaponIndex(){
   if(!data?.shots?.length){weaponIndex=new Map();return;}
   const idx=new Map();
-  for(const s of data.shots){
-    if(!idx.has(s.sh))idx.set(s.sh,[]);
-    idx.get(s.sh).push({t:s.t,wp:wpName(s.wp)});
-  }
+  for(const s of data.shots){if(!idx.has(s.sh))idx.set(s.sh,[]);idx.get(s.sh).push({t:s.t,wp:wpName(s.wp)});}
   weaponIndex=idx;
 }
 function getLastWeapon(name){
   if(!weaponIndex)return null;
-  const shots=weaponIndex.get(name);
-  if(!shots||!shots.length)return null;
+  const shots=weaponIndex.get(name);if(!shots||!shots.length)return null;
   let lo=0,hi=shots.length-1,res=null;
   while(lo<=hi){const mid=(lo+hi)>>1;if(shots[mid].t<=playTime){res=shots[mid].wp;lo=mid+1;}else hi=mid-1;}
   return res;
@@ -542,19 +454,13 @@ async function loadReplayList(){
   try{
     const res=await fetch('/api/replays'),json=await res.json();
     dirEl.textContent=json.dir||'';
-    if(!json.files?.length){
-      listEl.innerHTML='<div style="padding:12px;color:var(--muted);font-family:var(--mono);font-size:9px;">// нет реплеев<br><span style="color:var(--accent-dim)">'+json.dir+'</span></div>';
-      return;
-    }
+    if(!json.files?.length){listEl.innerHTML='<div style="padding:12px;color:var(--muted);font-family:var(--mono);font-size:9px;">// нет реплеев<br><span style="color:var(--accent-dim)">'+json.dir+'</span></div>';return;}
     listEl.innerHTML='';
     json.files.forEach(f=>{
       const d=new Date(f.mtime).toLocaleString('ru'),sz=(f.size/1024).toFixed(1)+' KB';
       const el=document.createElement('div');el.className='rl-item';
       el.innerHTML='<div class="ri-name">'+f.name+'</div><div class="ri-meta">'+d+' · '+sz+'</div>';
-      el.onclick=async()=>{
-        try{const r=await fetch('/api/replay/'+encodeURIComponent(f.name));loadReplay(await r.text(),f.name);rlWrap.classList.remove('visible');}
-        catch(e){showToast('Ошибка: '+e.message,'#550000');}
-      };
+      el.onclick=async()=>{try{const r=await fetch('/api/replay/'+encodeURIComponent(f.name));loadReplay(await r.text(),f.name);rlWrap.classList.remove('visible');}catch(e){showToast('Ошибка: '+e.message,'#550000');}};
       listEl.appendChild(el);
     });
   }catch(e){listEl.innerHTML='<div style="padding:12px;color:var(--accent2);font-family:var(--mono);font-size:9px;">// сервер недоступен</div>';}
@@ -565,27 +471,20 @@ function loadReplay(text,name){
   if(!data.meta)data.meta={};if(!data.kills)data.kills=[];
   if(!data.stats)data.stats=[];if(!data.frames)data.frames=[];if(!data.shots)data.shots=[];
   if(!data.meta.duration)data.meta.duration=data.frames.length?data.frames[data.frames.length-1].t:0;
-
-  // Авто-регистрация фракций из реплея
   registerFactionsFromReplay();
   buildWeaponIndex();
-
   playTime=0;playing=false;
-  document.getElementById('btn-play').textContent='▶';
-  document.getElementById('btn-play').classList.remove('active');
+  document.getElementById('btn-play').textContent='▶';document.getElementById('btn-play').classList.remove('active');
   dropzone.classList.add('hidden');rlWrap.classList.remove('visible');
   document.getElementById('rl-title').textContent=name||'';
   centerMap();buildTimeline();buildKills();buildStats();buildRoster();buildMeta(name);render();updateTime();
-  showToast('✓ '+name+' | fr:'+data.frames.length+' k:'+data.kills.length);
+  showToast('✓ '+name+' | fr:'+data.frames.length+' k:'+data.kills.length+' s:'+data.shots.length);
 }
 
 function centerMap(){
   if(!data?.frames?.length)return;
   for(const fr of data.frames){
-    if(fr.e?.length){
-      const g=L.featureGroup(fr.e.map(e=>L.circleMarker(wll(e.x,e.z))));
-      leafletMap.fitBounds(g.getBounds().pad(0.15));return;
-    }
+    if(fr.e?.length){const g=L.featureGroup(fr.e.map(e=>L.circleMarker(wll(e.x,e.z))));leafletMap.fitBounds(g.getBounds().pad(0.15));return;}
   }
 }
 
@@ -610,10 +509,7 @@ window.addEventListener('keydown',e=>{
 });
 function loop(ts){
   rafId=null;if(!playing||!data)return;
-  if(lastTs!==null){
-    playTime+=((ts-lastTs)/1000)*speed;
-    if(playTime>=data.meta.duration){playTime=data.meta.duration;playing=false;document.getElementById('btn-play').textContent='▶';document.getElementById('btn-play').classList.remove('active');}
-  }
+  if(lastTs!==null){playTime+=((ts-lastTs)/1000)*speed;if(playTime>=data.meta.duration){playTime=data.meta.duration;playing=false;document.getElementById('btn-play').textContent='▶';document.getElementById('btn-play').classList.remove('active');}}
   lastTs=ts;render();updateTime();hlKill();if(playing)rafId=requestAnimationFrame(loop);
 }
 function updateTime(){if(!data)return;document.getElementById('timeline').value=data.meta.duration>0?(playTime/data.meta.duration)*1000:0;document.getElementById('time-display').textContent=fmt(playTime)+' / '+fmt(data.meta.duration);}
@@ -629,17 +525,14 @@ function render(){
   const frame=getFrame(playTime);if(!frame)return;
   const vehPos=new Set();
   frame.e.forEach(s=>{if(s.t>0&&s.n&&!s.n.includes(' | Turret'))vehPos.add(Math.round(s.x)+','+Math.round(s.z));});
-  frame.e.forEach(s=>{
-    if(s.n==='Turret'&&vehPos.has(Math.round(s.x)+','+Math.round(s.z)))return;
-    drawEntity(s);
-  });
+  frame.e.forEach(s=>{if(s.n==='Turret'&&vehPos.has(Math.round(s.x)+','+Math.round(s.z)))return;drawEntity(s);});
 }
 function getFrame(t){if(!data?.frames?.length)return null;let lo=0,hi=data.frames.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(data.frames[mid].t<=t)lo=mid;else hi=mid-1;}return data.frames[lo];}
 
 function drawTracks(){
   const TRAIL=20,tMin=playTime-TRAIL,tracks={};
   for(const f of data.frames){if(f.t<tMin)continue;if(f.t>playTime)break;f.e.forEach(s=>{if(!tracks[s.id])tracks[s.id]={fac:s.fac,isVeh:s.t>0,pts:[]};tracks[s.id].pts.push(wll(s.x,s.z));});}
-  Object.values(tracks).forEach(tr=>{if(tr.pts.length<2)return;const col=facCSS(tr.fac);L.polyline(tr.pts,{color:col,opacity:tr.isVeh?0.5:0.3,weight:tr.isVeh?2:1,dashArray:tr.isVeh?null:'3,4',interactive:false}).addTo(tracksGroup);});
+  Object.values(tracks).forEach(tr=>{if(tr.pts.length<2)return;L.polyline(tr.pts,{color:facCSS(tr.fac),opacity:tr.isVeh?0.5:0.3,weight:tr.isVeh?2:1,dashArray:tr.isVeh?null:'3,4',interactive:false}).addTo(tracksGroup);});
 }
 
 function drawShots(){
@@ -661,7 +554,7 @@ function drawKillMarkers(){
     const wp=wpName(k.wp)||'?';
     const icon=L.divIcon({html:'<svg width="'+(r*2)+'" height="'+(r*2)+'" viewBox="-'+r+' -'+r+' '+(r*2)+' '+(r*2)+'"><line x1="-'+(r*.7)+'" y1="-'+(r*.7)+'" x2="'+(r*.7)+'" y2="'+(r*.7)+'" stroke="'+col+'" stroke-width="2.2" stroke-opacity="'+alpha+'"/><line x1="'+(r*.7)+'" y1="-'+(r*.7)+'" x2="-'+(r*.7)+'" y2="'+(r*.7)+'" stroke="'+col+'" stroke-width="2.2" stroke-opacity="'+alpha+'"/></svg>',className:'',iconSize:[r*2,r*2],iconAnchor:[r,r]});
     L.marker(wll(k.x,k.z),{icon,zIndexOffset:100})
-      .bindTooltip('<b style="color:'+col+'">'+k.kr+'</b> → <b>'+k.vi+'</b><br><span style="color:#8a9a80;font-size:10px">🔫 '+wp+' · '+fmt(k.t)+(k.tk?' [TK]':'')+'</span>',{permanent:false,direction:'top',className:'zv-tip'})
+      .bindTooltip('<b style="color:'+col+'">'+(k.kr||'?')+'</b> → <b>'+(k.vi||'?')+'</b><br><span style="color:#8a9a80;font-size:10px">🔫 '+wp+' · '+fmt(k.t)+(k.tk?' [TK]':'')+'</span>',{permanent:false,direction:'top',className:'zv-tip'})
       .on('click',()=>{playTime=k.t;render();updateTime();hlKill();}).addTo(killsGroup);
   });
 }
@@ -680,29 +573,27 @@ function drawEntity(s){
     const hp=s.hp!=null?s.hp:1.0,alive=hp>0;
     const hpPct=Math.round((hp!=null?hp:1)*100);
     const hpBarCol=hp<=0?'#6a1a1a':hp<0.33?'#8a4a0a':hp<0.66?'#7a6a00':'#1a6a2a';
+    const W=20,H=18,TH=H+4;
     const fillCol=alive?vc.fillColor:vc.destroyedColor;
     const strokeCol=alive?vc.strokeColor:'#4a3a1a';
     const fillO=alive?0.92:0.45;
-    const W=20,H=18,TH=H+4;
-    const svgRect='<rect x="1" y="4" width="'+(W-2)+'" height="'+(H-4)+'" rx="2" fill="'+fillCol+'" fill-opacity="'+fillO+'" stroke="'+strokeCol+'" stroke-width="2"/>';
-    const svgTri='<polygon points="'+W/2+',0 '+(W/2-5)+',7 '+(W/2+5)+',7" fill="'+(alive?strokeCol:'#5a3a1a')+'" fill-opacity="0.9"/>';
-    const rotStyle='position:relative;width:'+W+'px;height:'+TH+'px;transform:rotate('+(s.yaw||0)+'deg);transform-origin:'+W/2+'px '+H/2+'px;';
-    const hpBar='<div style="position:absolute;bottom:0;left:2px;right:2px;height:3px;background:rgba(0,0,0,.6);border-radius:1px;"><div style="height:3px;width:'+hpPct+'%;background:'+hpBarCol+';border-radius:1px;max-width:100%;"></div></div>';
-    const html='<div style="'+rotStyle+'"><svg width="'+W+'" height="'+TH+'" viewBox="0 0 '+W+' '+TH+'">'+svgRect+svgTri+'</svg>'+hpBar+'</div>';
-
+    const html='<div style="position:relative;width:'+W+'px;height:'+TH+'px;transform:rotate('+(s.yaw||0)+'deg);transform-origin:'+W/2+'px '+H/2+'px;">'
+      +'<svg width="'+W+'" height="'+TH+'" viewBox="0 0 '+W+' '+TH+'">'
+      +'<rect x="1" y="4" width="'+(W-2)+'" height="'+(H-4)+'" rx="2" fill="'+fillCol+'" fill-opacity="'+fillO+'" stroke="'+strokeCol+'" stroke-width="2"/>'
+      +'<polygon points="'+W/2+',0 '+(W/2-5)+',7 '+(W/2+5)+',7" fill="'+(alive?strokeCol:'#5a3a1a')+'" fill-opacity="0.9"/>'
+      +'</svg>'
+      +'<div style="position:absolute;bottom:0;left:2px;right:2px;height:3px;background:rgba(0,0,0,.6);border-radius:1px;">'
+      +'<div style="height:3px;width:'+hpPct+'%;background:'+hpBarCol+';border-radius:1px;max-width:100%;"></div></div></div>';
     const icon=L.divIcon({html,className:'',iconSize:[W,TH],iconAnchor:[W/2,H/2]});
     const m=L.marker(wll(s.x,s.z),{icon,zIndexOffset:50});
     m.bindTooltip('<b style="color:'+vc.labelColor+'">'+displayName+'</b><br><span style="color:'+(vc.hpTextColor||'#e0e0b0')+';font-size:10px">HP '+hpPct+'%'+(alive?'':' · уничтожена')+'</span>',{permanent:false,direction:'top',className:'zv-tip'});
-
     if(displayName){
-      const niHtml='<div style="position:absolute;top:'+(TH/2+5)+'px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:var(--sans);font-size:10px;font-weight:700;color:'+(alive?vc.labelColor:'#5a4a3a')+';text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.9);pointer-events:none;">'+displayName+'</div>';
-      const ni=L.divIcon({html:niHtml,className:'',iconSize:[0,0],iconAnchor:[0,0]});
+      const ni=L.divIcon({html:'<div style="position:absolute;top:'+(TH/2+5)+'px;left:50%;transform:translateX(-50%);white-space:nowrap;font-family:var(--sans);font-size:10px;font-weight:700;color:'+(alive?vc.labelColor:'#5a4a3a')+';text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.9);pointer-events:none;">'+displayName+'</div>',className:'',iconSize:[0,0],iconAnchor:[0,0]});
       L.marker(wll(s.x,s.z),{icon:ni,interactive:false,zIndexOffset:48}).addTo(markersGroup);
     }
     m.addTo(markersGroup);return;
   }
 
-  // ── Пехота ────────────────────────────────────────────────
   const r=isBot?4:6;
   const yaw=(s.yaw||0)*Math.PI/180;
   const fillCol=isBot?getBotFillColor(s.fac):facCSS(s.fac);
@@ -712,31 +603,24 @@ function drawEntity(s){
   const dash=isBot?' stroke-dasharray="3,2"':'';
   const ax=Math.sin(yaw)*(r+4),ay=-Math.cos(yaw)*(r+4);
   const sz=(r+8)*2,cx=sz/2,cy=sz/2;
-
   const html='<svg width="'+sz+'" height="'+sz+'" viewBox="0 0 '+sz+' '+sz+'">'
     +'<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="'+fillCol+'" fill-opacity="'+fillO+'" stroke="'+strokeCol+'" stroke-width="'+strokeW+'"'+dash+'/>'
-    +'<line x1="'+cx+'" y1="'+cy+'" x2="'+(cx+ax)+'" y2="'+(cy+ay)+'" stroke="'+strokeCol+'" stroke-width="'+strokeW+'" stroke-linecap="round"/>'
-    +'</svg>';
-
+    +'<line x1="'+cx+'" y1="'+cy+'" x2="'+(cx+ax)+'" y2="'+(cy+ay)+'" stroke="'+strokeCol+'" stroke-width="'+strokeW+'" stroke-linecap="round"/></svg>';
   const icon=L.divIcon({html,className:'',iconSize:[sz,sz],iconAnchor:[cx,cy]});
   const m=L.marker(wll(s.x,s.z),{icon,zIndexOffset:isBot?0:200});
 
   const showNick=dispOpts.nicknames&&(!isBot||dispOpts.botNicknames);
   if(showNick&&s.n){
-    const labelCol=isBot
-      ?(dispOpts.botUseFactionColor!==false?facLabelColor(s.fac)||getBotColor():getBotColor())
-      :facLabelColor(s.fac)||'#d0e8d0';
+    const labelCol=isBot?(dispOpts.botUseFactionColor!==false?facLabelColor(s.fac)||getBotColor():getBotColor()):facLabelColor(s.fac)||'#d0e8d0';
     let namePart=s.n;
     if(dispOpts.factionPrefix){const fk=normFac(s.fac);if(fk)namePart=fk+' | '+namePart;}
     const lastWp=dispOpts.weaponLabel?getLastWeapon(s.n):null;
     const bgOp=dispOpts.nicknameBgOpacity||0;
     const bgStyle=bgOp>0?'background:rgba(2,6,2,'+bgOp+');padding:2px 5px;border-radius:2px;':'';
     const permanent=!isBot&&(dispOpts.nicknameAlways!==false);
-
     let tipHtml='<div style="text-align:center;color:'+labelCol+';font-weight:700;font-size:11px;'+bgStyle+'text-shadow:0 1px 4px #000,0 0 8px rgba(0,0,0,.9);">'+namePart;
     if(lastWp)tipHtml+='<div style="color:#c8b860;font-size:9px;font-family:var(--mono);margin-top:1px;">⚙ '+lastWp+'</div>';
     tipHtml+='</div>';
-
     m.bindTooltip(tipHtml,{permanent,direction:'top',offset:[0,-r-2],className:'zv-lbl'});
     if(permanent){m.on('add',()=>{const el=m.getTooltip()?.getElement?.();if(el)el.style.color=labelCol;});}
   }
@@ -752,7 +636,7 @@ function buildTimeline(){
     const el=document.createElement('div');el.className='tl-mark';
     el.style.left=(k.t/data.meta.duration*100)+'%';
     el.style.background=k.tk?'#888800':'#880000';
-    el.title=fmt(k.t)+' '+(k.kr||'AI')+' → '+(k.vi||'?');
+    el.title=fmt(k.t)+' '+(k.kr||'?')+' → '+(k.vi||'?');
     el.onclick=()=>{playTime=k.t;render();updateTime();hlKill();};
     wrap.appendChild(el);
   });
@@ -767,16 +651,13 @@ function buildKills(){
     const kCol=facLabelColor(k.kfac)||'#b0c0a8';
     const vCol=facLabelColor(k.vfac)||'#b0c0a8';
     const wpD=wpName(k.wp);
-
     const tSpan=document.createElement('span');tSpan.className='kill-t';tSpan.textContent=fmt(k.t);
     const krSpan=document.createElement('span');krSpan.style.cssText='color:'+kCol+';font-weight:600;';krSpan.textContent=(k.kr||'AI')+(k.kbot?'[AI]':'');
     const arr=document.createElement('span');arr.className='kill-arr';arr.textContent='›';
     const viSpan=document.createElement('span');viSpan.style.color=vCol;viSpan.textContent=(k.vi||'?')+(k.vbot?'[AI]':'');
-
     row.append(tSpan,krSpan,arr,viSpan);
     if(k.tk){const t=document.createElement('span');t.style.cssText='color:#c8a800;font-size:8px;';t.textContent='[TK]';row.appendChild(t);}
     if(wpD){const w=document.createElement('span');w.className='kw-badge'+(k.kbot?'':' player');w.title=k.wp||'';w.textContent='⚙ '+wpD;row.appendChild(w);}
-
     row.onclick=()=>{playTime=k.t;leafletMap.setView(wll(k.x,k.z),leafletMap.getZoom());render();updateTime();hlKill();};
     el.appendChild(row);
   });
@@ -788,45 +669,27 @@ function buildRoster(){
   if(!data){el.innerHTML='<div style="padding:12px;color:var(--muted);font-family:var(--mono);font-size:9px;">// загрузите реплей</div>';return;}
   const players=new Map();
   data.stats?.forEach(s=>{players.set(s.name,{fac:s.fac,kills:s.kills||0,deaths:s.deaths||0,tk:s.tk||0,dist:s.dist||0,isBot:false});});
-  for(const fr of data.frames){
-    for(const e of fr.e){
-      if(e.t>0)continue;
-      if(!players.has(e.n))players.set(e.n,{fac:e.fac,kills:0,deaths:0,tk:0,dist:0,isBot:e.bot===true});
-    }
-  }
+  for(const fr of data.frames)for(const e of fr.e){if(e.t>0)continue;if(!players.has(e.n))players.set(e.n,{fac:e.fac,kills:0,deaths:0,tk:0,dist:0,isBot:e.bot===true});}
   const byFac=new Map();
-  players.forEach((p,name)=>{
-    const fk=normFac(p.fac)||'?';
-    if(!byFac.has(fk))byFac.set(fk,[]);
-    byFac.get(fk).push({name,...p});
-  });
-
+  players.forEach((p,name)=>{const fk=normFac(p.fac)||'?';if(!byFac.has(fk))byFac.set(fk,[]);byFac.get(fk).push({name,...p});});
   el.innerHTML='';
   byFac.forEach((members)=>{
     const fac=members[0].fac;
     const fCol=facLabelColor(fac)||facCSS(fac);
-    const fLbl=facName(fac);
     const pl=members.filter(m=>!m.isBot),bots=members.filter(m=>m.isBot);
-
-    const sect=document.createElement('div');sect.className='roster-faction';
-    sect.style.borderLeft='2px solid '+(facStroke(fac)||fCol);
-
+    const sect=document.createElement('div');sect.className='roster-faction';sect.style.borderLeft='2px solid '+(facStroke(fac)||fCol);
     const hdr=document.createElement('div');hdr.className='roster-faction-header';hdr.style.color=fCol;
-    hdr.innerHTML=fLbl+' <span style="color:var(--muted);font-weight:400;">('+members.length+')</span>';
+    hdr.innerHTML=facName(fac)+' <span style="color:var(--muted);font-weight:400;">('+members.length+')</span>';
     sect.appendChild(hdr);
-
     pl.forEach(p=>{
       const lc=facLabelColor(p.fac)||fCol;
       const kd=p.deaths>0?(p.kills/p.deaths).toFixed(1):(p.kills>0?'∞':'—');
       const dist=p.dist?(p.dist/1000).toFixed(1):'—';
       const row=document.createElement('div');row.className='roster-row';
-      row.innerHTML='<span class="roster-name" style="color:'+lc+'">● '+p.name+'</span>'
-        +'<span class="roster-stat"><span style="color:#5aaa5a">'+p.kills+'K</span> <span style="color:#aa5a5a">'+p.deaths+'D</span> <span style="color:var(--muted)">'+kd+'·'+dist+'km</span></span>';
+      row.innerHTML='<span class="roster-name" style="color:'+lc+'">● '+p.name+'</span><span class="roster-stat"><span style="color:#5aaa5a">'+p.kills+'K</span> <span style="color:#aa5a5a">'+p.deaths+'D</span> <span style="color:var(--muted)">'+kd+'·'+dist+'km</span></span>';
       sect.appendChild(row);
     });
-    if(bots.length){
-      const b=document.createElement('div');b.className='roster-bots';b.textContent='AI: '+bots.length;sect.appendChild(b);
-    }
+    if(bots.length){const b=document.createElement('div');b.className='roster-bots';b.textContent='AI: '+bots.length;sect.appendChild(b);}
     el.appendChild(sect);
   });
   if(!el.children.length)el.innerHTML='<div style="padding:12px;color:var(--muted);font-family:var(--mono);font-size:9px;">// нет данных</div>';
