@@ -139,7 +139,6 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 </style>
 </head>
 <body>
-
 <div id="topbar">
   <div id="logo">ZV<span>://</span>REPLAY</div>
   <div class="sep"></div>
@@ -156,11 +155,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
     <button class="ctrl-btn" id="btn-reset">⏮</button>
     <button class="ctrl-btn" id="btn-play">▶</button>
     <div class="sep"></div>
-    <div id="speed-ctrl">
-      <button id="speed-dec">−</button>
-      <div id="speed-val">10×</div>
-      <button id="speed-inc">+</button>
-    </div>
+    <div id="speed-ctrl"><button id="speed-dec">−</button><div id="speed-val">10×</div><button id="speed-inc">+</button></div>
     <div class="sep"></div>
     <div id="time-display">--:-- / --:--</div>
   </div>
@@ -216,7 +211,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       <div class="stab" data-stab="maps">КАРТЫ</div>
     </div>
 
-    <!-- Отображение -->
+    <!-- ОТОБРАЖЕНИЕ -->
     <div class="stab-content active" id="stab-display">
       <div class="settings-section">
         <h3>Никнеймы игроков</h3>
@@ -249,8 +244,15 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
           <div><div class="toggle-label">Оружие под именем</div><div class="toggle-desc">Последнее оружие под ником</div></div>
           <label class="toggle-switch"><input type="checkbox" id="opt-weapon-label" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
         </div>
+      </div>
+      <div class="settings-section">
+        <h3>Цвета ботов</h3>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Цвет ботов по фракции</div><div class="toggle-desc">ВКЛ = цвет фракции (US синий, FIA зелёный) · ВЫКЛ = единый цвет</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-bot-fac-color" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
         <div class="color-row">
-          <div><div class="color-label">Цвет маркеров ботов</div><div class="color-desc">Заливка кружков AI на карте</div></div>
+          <div><div class="color-label">Единый цвет ботов</div><div class="color-desc">Когда «по фракции» выключено</div></div>
           <input type="color" id="opt-bot-color" value="#5a7a6a"
             style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;"
             onchange="saveDisplayOpts();render()">
@@ -273,7 +275,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- Фракции -->
+    <!-- ФРАКЦИИ -->
     <div class="stab-content" id="stab-factions">
       <div class="settings-section">
         <h3>Добавить фракцию</h3>
@@ -290,7 +292,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- Оружие -->
+    <!-- ОРУЖИЕ -->
     <div class="stab-content" id="stab-weapons">
       <div class="settings-section">
         <h3>Маппинг оружия</h3>
@@ -307,7 +309,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- Техника -->
+    <!-- ТЕХНИКА -->
     <div class="stab-content" id="stab-vehicles">
       <div class="settings-section">
         <h3>Цвета техники</h3>
@@ -350,7 +352,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
       </div>
     </div>
 
-    <!-- Карты -->
+    <!-- КАРТЫ -->
     <div class="stab-content" id="stab-maps">
       <div class="settings-section">
         <h3>Загрузить карту</h3>
