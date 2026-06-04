@@ -1,0 +1,11 @@
+{
+  "name": "zv-replay-viewer",
+  "version": "3.0.0",
+  "description": "ZV Replay Viewer for Arma Reforger",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  }
+}

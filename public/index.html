@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZV Replay Viewer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0e0c;--panel:#0f1410;--panel2:#141a14;--border:#1e2b1e;--border2:#161e16;--accent:#4caf70;--accent-dim:#2a6b3a;--accent2:#c0453a;--accent3:#b0980a;--text:#d0e0cc;--text-dim:#a0b89a;--muted:#3a5038;--mono:'Share Tech Mono',monospace;--sans:'Barlow',sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);overflow:hidden;}
+#topbar{display:flex;align-items:center;gap:8px;padding:0 12px;height:42px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;z-index:1000;position:relative;}
+#logo{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:3px;text-shadow:0 0 20px rgba(76,175,112,.3);white-space:nowrap;}
+#logo span{color:var(--muted);}
+.sep{width:1px;height:18px;background:var(--border);flex-shrink:0;}
+.mode-tab{padding:3px 10px;font-family:var(--mono);font-size:9px;color:var(--muted);cursor:pointer;border:1px solid var(--border);border-right:none;transition:all .12s;}
+.mode-tab:last-of-type{border-right:1px solid var(--border);}
+.mode-tab.active{color:var(--accent);border-color:var(--accent-dim);background:rgba(76,175,112,.04);}
+.tb-btn{position:relative;overflow:hidden;background:transparent;border:1px solid var(--border);color:var(--text-dim);padding:3px 10px;font-family:var(--mono);font-size:9px;cursor:pointer;white-space:nowrap;transition:all .12s;}
+.tb-btn:hover{border-color:var(--accent-dim);color:var(--accent);}
+.tb-btn.accent{border-color:var(--accent-dim);color:var(--accent);}
+.tb-btn.accent:hover{background:var(--accent-dim);}
+.tb-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+#map-select{background:var(--panel2);border:1px solid var(--border);color:var(--text-dim);padding:3px 7px;font-family:var(--mono);font-size:9px;cursor:pointer;}
+#map-select:focus{outline:none;border-color:var(--accent-dim);}
+#transport{display:flex;align-items:center;gap:5px;margin-left:auto;}
+.ctrl-btn{background:transparent;border:1px solid var(--border);color:var(--muted);width:26px;height:26px;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .12s;}
+.ctrl-btn:hover,.ctrl-btn.active{border-color:var(--accent-dim);color:var(--accent);}
+#speed-ctrl{display:flex;align-items:center;border:1px solid var(--border);height:26px;}
+#speed-dec,#speed-inc{background:transparent;border:none;color:var(--muted);width:18px;height:26px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;}
+#speed-dec:hover,#speed-inc:hover{color:var(--accent);}
+#speed-val{font-family:var(--mono);font-size:10px;color:var(--accent);min-width:34px;text-align:center;line-height:24px;border-left:1px solid var(--border);border-right:1px solid var(--border);}
+#time-display{font-family:var(--mono);font-size:10px;color:var(--text-dim);min-width:100px;text-align:right;}
+#body{display:flex;height:calc(100vh - 42px - 20px);}
+#map-wrap{flex:1;position:relative;overflow:hidden;}
+#leaflet-map{width:100%;height:100%;background:#080b08;}
+.leaflet-container{background:#080b08;}
+.leaflet-control-zoom{margin:8px!important;}
+.leaflet-control-zoom a{background:var(--panel)!important;border-color:var(--border)!important;color:var(--accent)!important;width:22px!important;height:22px!important;line-height:22px!important;font-size:14px!important;}
+.leaflet-control-zoom a:hover{background:var(--panel2)!important;}
+#dropzone{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:500;background:var(--bg);}
+#dropzone.hidden{display:none;}
+.dz-icon{font-size:36px;margin-bottom:12px;animation:pulse 2.4s ease-in-out infinite;}
+@keyframes pulse{0%,100%{opacity:.3;}50%{opacity:.75;}}
+.dz-title{font-family:var(--mono);font-size:13px;color:var(--accent);letter-spacing:4px;margin-bottom:4px;}
+.dz-sub{font-size:11px;color:var(--muted);margin-bottom:18px;}
+.dz-btn{background:transparent;border:1px solid var(--accent-dim);color:var(--accent);padding:7px 22px;font-family:var(--mono);font-size:10px;cursor:pointer;position:relative;overflow:hidden;letter-spacing:1px;}
+.dz-btn:hover{background:var(--accent-dim);}
+.dz-btn input{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:100px;}
+.dz-path{margin-top:14px;font-family:var(--mono);font-size:8px;color:var(--muted);text-align:center;line-height:2;}
+.dz-path strong{color:var(--accent-dim);}
+#replay-list-wrap{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);z-index:500;}
+#replay-list-wrap.visible{display:flex;}
+#rl-header{padding:8px 12px;border-bottom:1px solid var(--border);font-family:var(--mono);flex-shrink:0;}
+#rl-header strong{color:var(--accent);display:block;margin-bottom:2px;font-size:10px;}
+#rl-dir{font-size:8px;color:var(--muted);display:block;word-break:break-all;}
+#replay-list{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:4px;}
+.rl-item{padding:8px 10px;border:1px solid var(--border);cursor:pointer;font-family:var(--mono);flex-shrink:0;}
+.rl-item:hover{border-color:var(--accent-dim);background:rgba(76,175,112,.04);}
+.ri-name{font-size:10px;color:var(--text);margin-bottom:2px;word-break:break-all;}
+.ri-meta{font-size:9px;color:var(--muted);}
+#right{width:282px;min-width:282px;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+.panel-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.tab{flex:1;padding:7px 2px;font-family:var(--mono);font-size:8px;letter-spacing:.3px;color:var(--muted);cursor:pointer;text-align:center;border-bottom:2px solid transparent;}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent-dim);}
+.tab-content{display:none;flex:1;overflow-y:auto;}
+.tab-content.active{display:block;}
+.kill-row{display:flex;align-items:center;gap:4px;padding:5px 9px;border-bottom:1px solid var(--border2);cursor:pointer;font-size:11px;flex-wrap:wrap;line-height:1.4;}
+.kill-row:hover{background:rgba(76,175,112,.04);}
+.kill-row.hl{background:rgba(76,175,112,.09);border-left:2px solid var(--accent-dim);padding-left:7px;}
+.kill-t{font-family:var(--mono);font-size:9px;color:var(--muted);min-width:32px;flex-shrink:0;}
+.kill-arr{color:var(--muted);font-size:9px;padding:0 2px;}
+.kw-badge{font-family:var(--mono);font-size:8px;color:var(--muted);background:rgba(76,175,112,.05);border:1px solid var(--border);padding:1px 5px;border-radius:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px;margin-left:auto;}
+.kw-badge.player{color:var(--accent3);border-color:rgba(176,152,10,.2);}
+.stats-tbl{width:100%;border-collapse:collapse;font-size:10px;}
+.stats-tbl th{padding:5px 7px;text-align:left;font-family:var(--mono);font-size:8px;letter-spacing:.8px;color:var(--muted);border-bottom:1px solid var(--border);background:var(--panel);position:sticky;top:0;}
+.stats-tbl td{padding:5px 7px;border-bottom:1px solid var(--border2);}
+.meta-block{padding:10px 11px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:9px;line-height:2.2;color:var(--text-dim);}
+.meta-block strong{color:var(--accent);}
+#timeline-wrap{padding:0 10px;background:var(--panel);border-top:1px solid var(--border);height:20px;display:flex;align-items:center;}
+#tl-markers-wrap{flex:1;position:relative;height:20px;display:flex;align-items:center;}
+.tl-mark{position:absolute;width:1px;height:8px;top:6px;transform:translateX(-50%);cursor:pointer;}
+#timeline{width:100%;height:2px;cursor:pointer;accent-color:var(--accent);position:relative;z-index:2;}
+#settings-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:2000;align-items:flex-start;justify-content:center;padding-top:28px;}
+#settings-overlay.open{display:flex;}
+#settings-modal{background:var(--panel);border:1px solid var(--border);width:620px;max-height:86vh;display:flex;flex-direction:column;}
+#settings-modal-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;}
+#settings-modal-header h2{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:2px;}
+#settings-close{background:transparent;border:none;color:var(--muted);font-size:16px;cursor:pointer;}
+#settings-close:hover{color:var(--accent);}
+.settings-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.stab{padding:8px 12px;font-family:var(--mono);font-size:9px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}
+.stab.active{color:var(--accent);border-bottom-color:var(--accent-dim);}
+.stab-content{display:none;overflow-y:auto;padding:12px 14px;max-height:calc(86vh - 100px);}
+.stab-content.active{display:block;}
+.settings-section{margin-bottom:16px;}
+.settings-section h3{font-family:var(--mono);font-size:8px;color:var(--muted);letter-spacing:1px;margin-bottom:8px;text-transform:uppercase;padding-bottom:4px;border-bottom:1px solid var(--border);}
+.form-row{display:flex;gap:6px;margin-bottom:6px;align-items:center;}
+.form-row input[type=text],.form-row input[type=number]{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;font-family:var(--mono);font-size:9px;}
+.form-row input[type=text]:focus,.form-row input[type=number]:focus{outline:none;border-color:var(--accent-dim);}
+.form-row input[type=text]::placeholder,.form-row input[type=number]::placeholder{color:var(--muted);}
+.form-row input[type=color]{width:32px;height:26px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;}
+.form-row button{background:transparent;border:1px solid var(--accent-dim);color:var(--accent);padding:4px 10px;font-family:var(--mono);font-size:9px;cursor:pointer;white-space:nowrap;}
+.form-row button:hover{background:var(--accent-dim);}
+.item-list{display:flex;flex-direction:column;gap:2px;margin-bottom:8px;}
+.list-item{display:flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--border);}
+.list-item-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.list-item-key{font-family:var(--mono);font-size:9px;color:var(--accent);min-width:50px;}
+.list-item-name{font-size:10px;color:var(--text-dim);flex:1;}
+.list-item-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:11px;padding:0 3px;}
+.list-item-del:hover{color:var(--accent2);}
+.map-upload-zone{border:1px dashed var(--border);padding:16px;text-align:center;cursor:pointer;position:relative;font-family:var(--mono);font-size:9px;color:var(--muted);}
+.map-upload-zone:hover{border-color:var(--accent-dim);color:var(--text-dim);}
+.map-upload-zone input{position:absolute;inset:0;opacity:0;cursor:pointer;}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);}
+.toggle-row:last-child{border-bottom:none;}
+.toggle-label{font-size:12px;color:var(--text);}
+.toggle-desc{font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:2px;}
+.toggle-switch{position:relative;width:34px;height:18px;flex-shrink:0;}
+.toggle-switch input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;inset:0;background:var(--bg);border:1px solid var(--border);border-radius:18px;cursor:pointer;transition:.15s;}
+.toggle-slider::before{content:'';position:absolute;width:12px;height:12px;background:var(--muted);border-radius:50%;left:2px;top:2px;transition:.15s;}
+.toggle-switch input:checked+.toggle-slider{border-color:var(--accent-dim);}
+.toggle-switch input:checked+.toggle-slider::before{transform:translateX(16px);background:var(--accent);}
+.color-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border2);}
+.color-row:last-child{border-bottom:none;}
+.color-label{font-size:12px;color:var(--text);}
+.color-desc{font-family:var(--mono);font-size:8px;color:var(--muted);margin-top:2px;}
+.roster-faction{margin:6px 8px;padding:8px 8px 6px 10px;background:rgba(76,175,112,.03);border-radius:1px;}
+.roster-faction-header{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:1px;margin-bottom:5px;text-transform:uppercase;}
+.roster-row{display:flex;align-items:center;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border2);}
+.roster-row:last-child{border-bottom:none;}
+.roster-name{font-size:11px;font-weight:600;}
+.roster-stat{font-family:var(--mono);font-size:9px;text-align:right;}
+.roster-bots{padding:4px 0;font-size:9px;color:var(--muted);}
+::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+  <div id="logo">ZV<span>://</span>REPLAY</div>
+  <div class="sep"></div>
+  <div style="display:flex;">
+    <div class="mode-tab active" data-mode="file">▲ ФАЙЛ</div>
+    <div class="mode-tab" data-mode="server">☰ СПИСОК</div>
+  </div>
+  <button class="tb-btn accent">ОТКРЫТЬ<input type="file" accept=".json" id="file-input"></button>
+  <div class="sep"></div>
+  <select id="map-select"><option value="everon">Everon</option><option value="arland">Arland</option></select>
+  <div class="sep"></div>
+  <button class="tb-btn" onclick="openSettings()">⚙ НАСТРОЙКИ</button>
+  <div id="transport">
+    <button class="ctrl-btn" id="btn-reset">⏮</button>
+    <button class="ctrl-btn" id="btn-play">▶</button>
+    <div class="sep"></div>
+    <div id="speed-ctrl">
+      <button id="speed-dec">−</button>
+      <div id="speed-val">10×</div>
+      <button id="speed-inc">+</button>
+    </div>
+    <div class="sep"></div>
+    <div id="time-display">--:-- / --:--</div>
+  </div>
+</div>
+
+<div id="body">
+  <div id="map-wrap">
+    <div id="leaflet-map"></div>
+    <div id="dropzone">
+      <div class="dz-icon">🎬</div>
+      <div class="dz-title">ZV REPLAY VIEWER</div>
+      <div class="dz-sub">Просмотр реплеев Arma Reforger</div>
+      <button class="dz-btn">[ ОТКРЫТЬ РЕПЛЕЙ ]<input type="file" accept=".json" id="file-input-dz"></button>
+      <div class="dz-path"><strong>%LOCALAPPDATA%\Arma Reforger\profile\replay\</strong><br>или перетащите .json на карту</div>
+    </div>
+    <div id="replay-list-wrap">
+      <div id="rl-header"><strong id="rl-title">Список реплеев</strong><span id="rl-dir"></span></div>
+      <div id="replay-list"></div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div class="panel-tabs">
+      <div class="tab active" data-tab="kills">УБИЙСТВА</div>
+      <div class="tab" data-tab="roster">СОСТАВ</div>
+      <div class="tab" data-tab="stats">СТАТЫ</div>
+      <div class="tab" data-tab="meta">ИНФО</div>
+    </div>
+    <div class="tab-content active" id="tab-kills"><div style="padding:14px;color:var(--muted);font-family:var(--mono);font-size:9px;">// загрузите реплей</div></div>
+    <div class="tab-content" id="tab-roster"><div style="padding:14px;color:var(--muted);font-family:var(--mono);font-size:9px;">// загрузите реплей</div></div>
+    <div class="tab-content" id="tab-stats"><div style="padding:14px;color:var(--muted);font-family:var(--mono);font-size:9px;">// загрузите реплей</div></div>
+    <div class="tab-content" id="tab-meta"><div style="padding:14px;color:var(--muted);font-family:var(--mono);font-size:9px;">// загрузите реплей</div></div>
+  </div>
+</div>
+
+<div id="timeline-wrap">
+  <div id="tl-markers-wrap">
+    <input type="range" id="timeline" min="0" max="1000" value="0" step="1">
+  </div>
+</div>
+
+<div id="settings-overlay" onclick="if(event.target===this)closeSettings()">
+  <div id="settings-modal">
+    <div id="settings-modal-header">
+      <h2>⚙ НАСТРОЙКИ</h2>
+      <button id="settings-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="settings-tabs">
+      <div class="stab active" data-stab="display">ОТОБРАЖЕНИЕ</div>
+      <div class="stab" data-stab="factions">ФРАКЦИИ</div>
+      <div class="stab" data-stab="weapons">ОРУЖИЕ</div>
+      <div class="stab" data-stab="vehicles">ТЕХНИКА</div>
+      <div class="stab" data-stab="maps">КАРТЫ</div>
+    </div>
+
+    <!-- Отображение -->
+    <div class="stab-content active" id="stab-display">
+      <div class="settings-section">
+        <h3>Никнеймы игроков</h3>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Показывать никнеймы</div><div class="toggle-desc">Общее включение подписей игроков</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-nicknames" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Постоянно на карте</div><div class="toggle-desc">ВКЛ = всегда видно · ВЫКЛ = только при наведении</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-nickname-always" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Прозрачность фона ника</div><div class="color-desc">0% = нет фона · 100% = тёмный фон за именем</div></div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="opt-nick-bg-label" style="font-family:var(--mono);font-size:9px;color:var(--accent);min-width:28px;text-align:right;">0%</span>
+            <input type="range" id="opt-nick-bg-opacity" min="0" max="1" step="0.05" value="0"
+              style="width:80px;accent-color:var(--accent);cursor:pointer;"
+              oninput="updateBgOpacityLabel()" onchange="saveDisplayOpts();render()">
+          </div>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Никнеймы ботов</div><div class="toggle-desc">Имена AI — только при наведении</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-bot-nicknames" onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Фракция перед именем</div><div class="toggle-desc" style="color:var(--accent);font-size:9px;">US | abrashkaa</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-faction-prefix" onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Оружие под именем</div><div class="toggle-desc">Последнее оружие под ником</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-weapon-label" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Цвет маркеров ботов</div><div class="color-desc">Заливка кружков AI на карте</div></div>
+          <input type="color" id="opt-bot-color" value="#5a7a6a"
+            style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;"
+            onchange="saveDisplayOpts();render()">
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Слои</h3>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Выстрелы</div><div class="toggle-desc">Линии при стрельбе</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-shots" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Треки движения</div><div class="toggle-desc">Следы за последние 20 секунд</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-tracks" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <div><div class="toggle-label">Маркеры убийств</div><div class="toggle-desc">Крестики ✕ на месте гибели</div></div>
+          <label class="toggle-switch"><input type="checkbox" id="opt-kill-markers" checked onchange="saveDisplayOpts();render()"><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Фракции -->
+    <div class="stab-content" id="stab-factions">
+      <div class="settings-section">
+        <h3>Добавить фракцию</h3>
+        <div class="form-row">
+          <input type="text" id="fac-key-in" placeholder="Ключ (US, FIA ...)">
+          <input type="text" id="fac-name-in" placeholder="Название">
+          <input type="color" id="fac-color-in" value="#2a6b3a">
+          <button onclick="addFaction()">+ ДОБАВИТЬ</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Фракции <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none;font-size:8px;">✎ = 3 цвета: заливка · обводка · ник</span></h3>
+        <div class="item-list" id="fac-list"></div>
+      </div>
+    </div>
+
+    <!-- Оружие -->
+    <div class="stab-content" id="stab-weapons">
+      <div class="settings-section">
+        <h3>Маппинг оружия</h3>
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-bottom:8px;line-height:1.8;">#AR-Weapon_M16A2_Name → M16A2<br>Без записи — авто-парсинг</div>
+        <div class="form-row">
+          <input type="text" id="wp-key-in" placeholder="#AR-Weapon_..._Name">
+          <input type="text" id="wp-name-in" placeholder="M16A2">
+          <button onclick="addWeapon()">+ ДОБАВИТЬ</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Список</h3>
+        <div class="item-list" id="wp-list"></div>
+      </div>
+    </div>
+
+    <!-- Техника -->
+    <div class="stab-content" id="stab-vehicles">
+      <div class="settings-section">
+        <h3>Цвета техники</h3>
+        <div class="color-row">
+          <div><div class="color-label">Заливка маркера</div><div class="color-desc">Основной цвет прямоугольника</div></div>
+          <input type="color" id="vc-fill" value="#1a2a3a" style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;">
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Обводка и нос</div><div class="color-desc">Граница + треугольник направления</div></div>
+          <input type="color" id="vc-stroke" value="#4a8aaa" style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;">
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Название под маркером</div><div class="color-desc">Цвет подписи техники на карте</div></div>
+          <input type="color" id="vc-label" value="#a0c8d8" style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;">
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Текст HP в тултипе</div><div class="color-desc">Цвет «HP 85%» при наведении</div></div>
+          <input type="color" id="vc-hp-text" value="#e0e0b0" style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;">
+        </div>
+        <div class="color-row">
+          <div><div class="color-label">Уничтоженная техника</div><div class="color-desc">Заливка при HP = 0</div></div>
+          <input type="color" id="vc-destroyed" value="#3a2a1a" style="width:38px;height:24px;border:1px solid var(--border);background:transparent;cursor:pointer;padding:2px;">
+        </div>
+        <div class="form-row" style="margin-top:10px;">
+          <button style="width:100%;padding:6px;" onclick="saveVehColors()">✓ ПРИМЕНИТЬ ЦВЕТА</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Маппинг названий</h3>
+        <div style="font-size:9px;color:var(--muted);font-family:var(--mono);margin-bottom:8px;line-height:1.8;">#AR-Vehicle_M923A1_Engineer_Name → M923A1<br>Без записи — авто-парсинг</div>
+        <div class="form-row">
+          <input type="text" id="veh-key-in" placeholder="#AR-Vehicle_..._Name">
+          <input type="text" id="veh-name-in" placeholder="M923A1">
+          <button onclick="addVehicle()">+ ДОБАВИТЬ</button>
+        </div>
+      </div>
+      <div class="settings-section">
+        <h3>Список</h3>
+        <div class="item-list" id="veh-list"></div>
+      </div>
+    </div>
+
+    <!-- Карты -->
+    <div class="stab-content" id="stab-maps">
+      <div class="settings-section">
+        <h3>Загрузить карту</h3>
+        <div class="form-row">
+          <input type="text" id="map-key-in" placeholder="Ключ (everon)">
+          <input type="text" id="map-label-in" placeholder="Название">
+          <input type="number" id="map-size-in" placeholder="Размер м" style="width:100px">
+        </div>
+        <div class="map-upload-zone" onclick="document.getElementById('map-file-in').click()">
+          📂 Выбрать JPG/PNG изображение карты
+          <input type="file" id="map-file-in" accept=".jpg,.jpeg,.png" style="display:none" onchange="handleMapUpload(this)">
+        </div>
+        <div id="map-upload-status" style="margin-top:6px;font-family:var(--mono);font-size:9px;color:var(--muted);"></div>
+      </div>
+      <div class="settings-section">
+        <h3>Доступные карты</h3>
+        <div class="item-list" id="maps-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="viewer.js"></script>
+</body>
+</html>
